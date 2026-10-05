@@ -115,8 +115,7 @@ class LPPCFileCheckerPlugin final : public EuroScopePlugIn::CPlugIn {
             return;
         }
 
-        std::filesystem::path root = filechecker::DefaultPackageRoot();
-        if (!root.empty() && std::filesystem::is_regular_file(root)) root = root.parent_path();
+        const std::filesystem::path root = filechecker::ResolvePackageRoot();
 
         const auto result = filechecker::CheckPackageFiles(root, *package);
 

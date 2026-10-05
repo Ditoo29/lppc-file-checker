@@ -25,6 +25,7 @@ struct PackageCheckResult {
 std::string FetchUrl(const std::string& url);
 std::optional<PackageMetadata> ParseInstallPackage(const std::string& pageText);
 std::filesystem::path DefaultPackageRoot();
+std::filesystem::path ResolvePackageRoot();
 PackageCheckResult CheckPackageFiles(const std::filesystem::path& packageRoot, const PackageMetadata& package);
 
 }  // namespace filechecker

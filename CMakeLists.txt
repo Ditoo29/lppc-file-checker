@@ -43,7 +43,6 @@ target_include_directories(file_checker_core
 target_link_libraries(file_checker_core
     PUBLIC
         winhttp
-        shlwapi
 )
 
 if(LPPC_FILE_CHECKER_BUILD_DLL)
@@ -70,7 +69,6 @@ if(LPPC_FILE_CHECKER_BUILD_DLL)
             file_checker_core
             ${EUROSCOPE_LIBRARY}
             winhttp
-            shlwapi
             user32
     )
 

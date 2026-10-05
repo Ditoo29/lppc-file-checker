@@ -9,7 +9,6 @@
 
 #include <windows.h>
 #include <winhttp.h>
-#include <shlwapi.h>
 
 namespace filechecker {
 
@@ -174,6 +173,30 @@ std::filesystem::path DefaultPackageRoot() {
     DWORD n = GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
     if (n == 0 || n >= MAX_PATH) return {};
     return std::filesystem::path(appData) / "EuroScope";
+}
+
+std::filesystem::path ResolvePackageRoot() {
+    std::error_code ec;
+
+    wchar_t modulePath[MAX_PATH]{};
+    HMODULE module = nullptr;
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(&ResolvePackageRoot), &module)) {
+        const DWORD n = GetModuleFileNameW(module, modulePath, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH) modulePath[0] = L'\0';
+    }
+
+    std::filesystem::path dir = std::filesystem::path(modulePath).parent_path();
+    while (!dir.empty()) {
+        if (std::filesystem::exists(dir / "LPPC ACS.prf", ec) || std::filesystem::exists(dir / "LPPC APS.prf", ec)) {
+            return dir;
+        }
+        const std::filesystem::path parent = dir.parent_path();
+        if (parent == dir || parent.empty()) break;
+        dir = parent;
+    }
+
+    return DefaultPackageRoot();
 }
 
 }  // namespace filechecker
