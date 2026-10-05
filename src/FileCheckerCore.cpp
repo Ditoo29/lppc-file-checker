@@ -5,14 +5,11 @@
 #include <cstdio>
 #include <optional>
 #include <regex>
-#include <sstream>
 #include <system_error>
 
 #include <windows.h>
 #include <winhttp.h>
 #include <shlwapi.h>
-
-extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace filechecker {
 
@@ -36,29 +33,6 @@ std::string Trim(std::string text) {
 std::string RemoveSpacesAndSlashes(std::string text) {
     text.erase(std::remove_if(text.begin(), text.end(), [](unsigned char ch) { return ch == ' ' || ch == '/'; }), text.end());
     return text;
-}
-
-std::string NormalizeTimestamp(std::string released) {
-    released.erase(std::remove_if(released.begin(), released.end(), [](unsigned char ch) { return ch == '-' || ch == ':' || ch == ' '; }), released.end());
-    return released;
-}
-
-std::wstring GetModuleFolderWide() {
-    wchar_t modulePath[MAX_PATH]{};
-    GetModuleFileNameW(reinterpret_cast<HMODULE>(&__ImageBase), modulePath, MAX_PATH);
-    std::wstring folder(modulePath);
-    const size_t pos = folder.find_last_of(L"\\/");
-    if (pos != std::wstring::npos) folder.erase(pos);
-    return folder;
-}
-
-std::filesystem::path FindLppcRoot(std::filesystem::path path) {
-    while (!path.empty()) {
-        if (path.filename() == L"LPPC") return path;
-        if (!path.has_parent_path()) break;
-        path = path.parent_path();
-    }
-    return {};
 }
 
 std::string FetchUrlWithWinHttp(const std::string& url) {
@@ -109,7 +83,7 @@ std::string FetchUrlWithWinHttp(const std::string& url) {
     return response;
 }
 
-std::optional<PackageMetadata> ParseInstallPackage(const std::string& pageText) {
+std::optional<PackageMetadata> ParseInstallRow(const std::string& pageText) {
     static const std::regex htmlRowPattern(
         R"(<tr>\s*<td>\s*ES\s*</td>\s*<td>\s*LPPC Install-Package\s*</td>\s*<td>\s*([0-9]{4}\s*/\s*[0-9]{2})\s*</td>\s*<td>\s*([0-9]+)\s*</td>\s*<td>\s*([0-9]{4}-[0-9]{2}-[0-9]{2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2})\s*<td)",
         std::regex::ECMAScript);
@@ -131,15 +105,18 @@ std::optional<PackageMetadata> ParseInstallPackage(const std::string& pageText) 
     return metadata;
 }
 
-std::string SuffixAfterSecondHyphen(const std::string& stem) {
-    const auto first = stem.find('-');
-    if (first == std::string::npos) return {};
-    const auto second = stem.find('-', first + 1);
-    if (second == std::string::npos || second + 1 >= stem.size()) return {};
-    return stem.substr(second + 1);
+std::string BuildFileSuffix(const PackageMetadata& package) {
+    std::string versionText = package.version;
+    try {
+        char buffer[16]{};
+        std::snprintf(buffer, sizeof(buffer), "%04d", std::stoi(package.version));
+        versionText = buffer;
+    } catch (...) {}
+
+    return RemoveSpacesAndSlashes(package.airac) + "-" + versionText;
 }
 
-bool MatchesSuffixAndPrefix(const std::filesystem::path& file, const std::string& suffix) {
+bool MatchesPackageFile(const std::filesystem::path& file, const std::string& suffix) {
     if (file.extension() != ".ese" && file.extension() != ".sct") return false;
     const std::string name = file.filename().u8string();
     if (name.rfind("LPPC", 0) != 0) return false;
@@ -152,25 +129,14 @@ std::string FetchUrl(const std::string& url) {
     return FetchUrlWithWinHttp(url);
 }
 
-std::optional<PackageMetadata> ParseLatestUpdatePackage(const std::string& pageText) {
-    return ParseInstallPackage(pageText);
-}
-
-std::string BuildExpectedStem(const PackageMetadata& package) {
-    std::string versionText = package.version;
-    try {
-        char buffer[16]{};
-        std::snprintf(buffer, sizeof(buffer), "%04d", std::stoi(package.version));
-        versionText = buffer;
-    } catch (...) {}
-
-    return "LPPC-Package_" + NormalizeTimestamp(package.released) + "-" + RemoveSpacesAndSlashes(package.airac) + "-" + versionText;
+std::optional<PackageMetadata> ParseInstallPackage(const std::string& pageText) {
+    return ParseInstallRow(pageText);
 }
 
 PackageCheckResult CheckPackageFiles(const std::filesystem::path& packageRoot, const PackageMetadata& package) {
     PackageCheckResult result;
     result.packageRoot = packageRoot;
-    result.expectedStem = BuildExpectedStem(package);
+    result.expectedSuffix = BuildFileSuffix(package);
 
     std::error_code ec;
     if (!std::filesystem::exists(packageRoot, ec)) {
@@ -178,14 +144,13 @@ PackageCheckResult CheckPackageFiles(const std::filesystem::path& packageRoot, c
         return result;
     }
 
-    const std::string suffix = SuffixAfterSecondHyphen(result.expectedStem);
     bool hasEse = false;
     bool hasSct = false;
 
     for (const auto& entry : std::filesystem::directory_iterator(packageRoot, ec)) {
         if (ec) break;
         if (!entry.is_regular_file()) continue;
-        if (!MatchesSuffixAndPrefix(entry.path(), suffix)) continue;
+        if (!MatchesPackageFile(entry.path(), result.expectedSuffix)) continue;
 
         if (entry.path().extension() == ".ese") {
             hasEse = true;
@@ -198,7 +163,7 @@ PackageCheckResult CheckPackageFiles(const std::filesystem::path& packageRoot, c
 
     result.success = hasEse && hasSct;
     if (!result.success) {
-        result.issues.push_back("Missing matching .ese and .sct files for suffix: " + suffix);
+        result.issues.push_back("Missing matching .ese and .sct files for suffix: " + result.expectedSuffix);
     }
 
     return result;
@@ -209,30 +174,6 @@ std::filesystem::path DefaultPackageRoot() {
     DWORD n = GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
     if (n == 0 || n >= MAX_PATH) return {};
     return std::filesystem::path(appData) / "EuroScope";
-}
-
-std::string BuildReportText(const PackageCheckResult& result, const PackageMetadata& package) {
-    std::ostringstream report;
-    report << "LPPC file checker\n";
-    report << "Package: " << package.packageName << "\n";
-    report << "AIRAC: " << package.airac << "\n";
-    report << "Version: " << package.version << "\n";
-    report << "Released: " << package.released << "\n";
-    report << "Expected stem: " << result.expectedStem << "\n";
-    report << "Root: " << result.packageRoot.u8string() << "\n";
-    report << "Status: " << (result.success ? "OK" : "FAILED") << "\n";
-
-    if (!result.matchingFiles.empty()) {
-        report << "Matched files:\n";
-        for (const auto& file : result.matchingFiles) report << "- " << file.u8string() << "\n";
-    }
-
-    if (!result.issues.empty()) {
-        report << "Issues:\n";
-        for (const auto& issue : result.issues) report << "- " << issue << "\n";
-    }
-
-    return report.str();
 }
 
 }  // namespace filechecker
