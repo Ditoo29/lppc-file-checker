@@ -18,7 +18,7 @@
 namespace {
 
 constexpr const char* kPluginName = "LPPC File Checker";
-constexpr const char* kPluginVersion = "1.0.0";
+constexpr const char* kPluginVersion = "1.1.0";
 constexpr const char* kPluginAuthor = "Dito29";
 constexpr const char* kPluginCopyright = "(c) 2026 Dito29";
 constexpr const char* kPackagesUrl = "https://files.aero-nav.com/LPPC";
@@ -44,15 +44,6 @@ bool ParseLPPCFileCheckerCommand(const char* sCommandLine) {
     iss >> command;
     command = ToLower(command);
     return command == ".lppcversion" || command == "lppcversion";
-}
-
-std::string CheckedSuffix(const filechecker::PackageMetadata& package) {
-    const std::string stem = filechecker::BuildExpectedStem(package);
-    const auto first = stem.find('-');
-    if (first == std::string::npos) return {};
-    const auto second = stem.find('-', first + 1);
-    if (second == std::string::npos || second + 1 >= stem.size()) return {};
-    return stem.substr(second + 1);
 }
 
 std::string BuildSuccessMessage(const filechecker::PackageCheckResult& result, const filechecker::PackageMetadata& package) {
@@ -117,7 +108,7 @@ class LPPCFileCheckerPlugin final : public EuroScopePlugIn::CPlugIn {
             return;
         }
 
-        const auto package = filechecker::ParseLatestUpdatePackage(pageText);
+        const auto package = filechecker::ParseInstallPackage(pageText);
         if (!package) {
             ShowWarningPopup("Could not verify LPPC files because package information could not be parsed.\n\nReference website:\nhttps://files.aero-nav.com/LPPC", kPluginName);
             if (fromCommand) SendChat("Could not parse package rows from " + std::string(kPackagesUrl));
@@ -141,8 +132,6 @@ class LPPCFileCheckerPlugin final : public EuroScopePlugIn::CPlugIn {
 LPPCFileCheckerPlugin* g_plugin = nullptr;
 
 }  // namespace
-
-extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 void __declspec(dllexport) EuroScopePlugInInit(EuroScopePlugIn::CPlugIn** ppPlugInInstance) {
     g_plugin = new LPPCFileCheckerPlugin();
