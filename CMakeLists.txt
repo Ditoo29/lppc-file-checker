@@ -5,6 +5,8 @@ set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
 
 project(LPPCFileChecker VERSION 0.1.0 LANGUAGES CXX)
 
+enable_language(RC)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -43,6 +45,8 @@ target_include_directories(file_checker_core
 target_link_libraries(file_checker_core
     PUBLIC
         winhttp
+        ole32
+        shell32
 )
 
 if(LPPC_FILE_CHECKER_BUILD_DLL)
@@ -54,9 +58,32 @@ if(LPPC_FILE_CHECKER_BUILD_DLL)
         message(FATAL_ERROR "Set EUROSCOPE_LIBRARY to the EuroScopePlugInDLL.lib path")
     endif()
 
+    add_executable(LPPCUpdateWizard WIN32 src/UpdateWizard.cpp)
+    target_link_libraries(LPPCUpdateWizard PRIVATE file_checker_core user32)
+    set_target_properties(LPPCUpdateWizard PROPERTIES OUTPUT_NAME "LPPCUpdateWizard")
+
+    set(WIZARD_RC "${CMAKE_CURRENT_BINARY_DIR}/WizardResource.rc")
+    set(WIZARD_RC_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/GenerateWizardResource.cmake")
+    file(GENERATE OUTPUT "${WIZARD_RC_SCRIPT}" CONTENT [==[
+set(_rc "${CMAKE_CURRENT_LIST_DIR}/WizardResource.rc")
+set(_wizard "$<TARGET_FILE:LPPCUpdateWizard>")
+file(SIZE "${_wizard}" _size)
+file(TIMESTAMP "${_wizard}" _stamp "%Y%m%d%H%M%S")
+file(WRITE "${_rc}" "1 RCDATA \"${_wizard}\"\n// wizard build ${_stamp} size ${_size}\n")
+]==])
+    add_custom_command(
+        OUTPUT "${WIZARD_RC}"
+        COMMAND "${CMAKE_COMMAND}" -P "${WIZARD_RC_SCRIPT}"
+        DEPENDS LPPCUpdateWizard "${WIZARD_RC_SCRIPT}"
+        COMMENT "Generating wizard resource file"
+        VERBATIM)
+    set_source_files_properties("${WIZARD_RC}" PROPERTIES GENERATED TRUE)
+
     add_library(LPPCFileChecker SHARED
         src/FileCheckerPlugin.cpp
+        "${WIZARD_RC}"
     )
+    add_dependencies(LPPCFileChecker LPPCUpdateWizard)
 
     target_include_directories(LPPCFileChecker
         PRIVATE
